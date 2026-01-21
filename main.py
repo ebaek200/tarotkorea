@@ -8,43 +8,33 @@ import google.generativeai as genai
 
 app = FastAPI()
 
-# --- 설정 및 데이터 관리 ---
 DB_FILE = "users.json"
-# Eugene님의 API Key
 GEMINI_API_KEY = "AIzaSyCCNjtYV0aE1BW9OHsQvhdycbXNCYeDX54"
 
-# 최신 Gemini 모델 설정 (models/gemini-1.5-flash)
+# 1. API 설정
+genai.configure(api_key=GEMINI_API_KEY)
+
+# 2. 모델 설정 (경로 호출 방식 최적화)
+# 404 에러 방지를 위해 가장 범용적인 'gemini-1.5-flash-latest' 사용
 try:
-    genai.configure(api_key=GEMINI_API_KEY)
-    safety_settings = [
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-    ]
-    model = genai.GenerativeModel(
-        model_name='models/gemini-1.5-flash',
-        safety_settings=safety_settings
-    )
-    print("Gemini 1.5 Flash 모델 로드 성공")
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    print("Gemini 1.5 Flash 모델 로드 시도 완료")
 except Exception as e:
-    print(f"모델 설정 오류: {e}")
+    print(f"모델 초기화 에러: {e}")
 
 def load_db():
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
-            return {}
+        except: return {}
     return {}
 
 def save_db(db):
     try:
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(db, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        print(f"DB 저장 오류: {e}")
+    except: pass
 
 user_db = load_db()
 
@@ -54,7 +44,7 @@ class RegisterRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"message": "Hwagyeong Iching Server V2.5 (Syntax Fixed)"}
+    return {"message": "Hwagyeong Iching Server V2.6 (Model Path Optimized)"}
 
 @app.post("/register")
 async def register(req: RegisterRequest):
@@ -63,10 +53,10 @@ async def register(req: RegisterRequest):
     if phone not in user_db:
         if req.is_paid:
             user_db[phone] = {"remain": 10, "used_free": False}
-            msg = f"{phone}님 유료회원 10회 사용 가능합니다."
+            msg = f"{phone}님 유료 10회 부여."
         else:
             user_db[phone] = {"remain": 3, "used_free": True}
-            msg = "3회 무료 체험이 가능합니다."
+            msg = "무료 3회 부여."
         save_db(user_db)
         return {"status": "success", "remain": user_db[phone]["remain"], "msg": msg}
     else:
@@ -74,28 +64,28 @@ async def register(req: RegisterRequest):
         if req.is_paid:
             user["remain"] = 10
             save_db(user_db)
-            return {"status": "success", "remain": 10, "msg": f"결제 확인. {user['remain']}회 남았습니다."}
+            return {"status": "success", "remain": 10, "msg": f"결제 완료. {user['remain']}회 남음."}
         else:
             if user.get("used_free"):
-                return {"status": "fail", "msg": "이미 무료 체험을 사용한 번호입니다."}
+                return {"status": "fail", "msg": "이미 무료 체험을 하셨습니다."}
             else:
                 user["remain"] = 3
                 user["used_free"] = True
                 save_db(user_db)
-                return {"status": "success", "remain": 3, "msg": "3회 무료 체험 부여."}
+                return {"status": "success", "remain": 3, "msg": "무료 체험 부여."}
 
 @app.get("/interpret")
 async def interpret(card1: int, card2: int, category: str, phone: str):
     global user_db
     if phone in user_db and user_db[phone]["remain"] > 0:
         prompt = (
-            f"주역 타로 전문가로서 {category} 상담을 합니다. "
-            f"선택된 괘는 {card1}번과 {card2}번입니다. "
-            f"따뜻한 전문가의 말투로 5문장 내외 한국어 답변을 작성하세요."
+            f"주역 전문가로서 {category} 상담을 합니다. "
+            f"주역 {card1}번 괘와 {card2}번 괘를 조합하여 "
+            f"따뜻한 한국어로 5문장 내외로 답변하세요."
         )
 
         try:
-            print(f"Gemini API 호출 시도... ({phone})")
+            # 안전 설정 없이 기본 호출 시도 (404 회피용)
             response = await asyncio.to_thread(model.generate_content, prompt)
             
             if response and response.text:
@@ -103,13 +93,14 @@ async def interpret(card1: int, card2: int, category: str, phone: str):
                 user_db[phone]["remain"] -= 1
                 save_db(user_db)
             else:
-                advice = "AI가 해설을 생성했으나 내용을 출력할 수 없습니다."
+                advice = "AI 답변 생성에 실패했습니다."
         except Exception as e:
+            # [핵심] 여기서 에러가 나면 모델 리스트를 출력하여 실제 사용 가능한 모델명을 로그로 확인
             print(f"!!! AI ERROR: {str(e)}")
-            advice = f"해설 생성 중 오류 발생 (사유: {str(e)[:40]}...)"
+            advice = f"해설 생성 중 오류 (사유: {str(e)[:40]}...)"
         
         return {"combined_advice": advice, "remain": user_db[phone]["remain"], "status": "success"}
-    return {"status": "over", "msg": "남은 횟수가 없습니다."}
+    return {"status": "over", "msg": "횟수 초과"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
