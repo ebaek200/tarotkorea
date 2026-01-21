@@ -7,7 +7,7 @@ app = FastAPI()
 
 user_db = {}
 
-# 종합 해설 문장 (5줄 구성을 위해 사용)
+# 종합 해설 문장 소스
 sentences = [
     "현재 운세는 새로운 변화의 흐름 앞에 서 있습니다.",
     "과거의 낡은 습관을 버리고 새 길을 찾는 것이 길합니다.",
@@ -29,15 +29,18 @@ class RegisterRequest(BaseModel):
 async def register(req: RegisterRequest):
     if req.phone not in user_db:
         user_db[req.phone] = 10 if req.is_paid else 1
+    else:
+        if req.is_paid: user_db[req.phone] = 10 # 이미 있어도 유료면 갱신
     return {"remain": user_db[req.phone]}
 
 @app.get("/interpret")
 async def interpret(card1: int, card2: int, category: str, phone: str):
+    # 횟수 차감 로직
     if phone in user_db and user_db[phone] > 0:
         user_db[phone] -= 1
 
     selected = random.sample(sentences, 5)
-    advice = "\n".join(selected) # 번호 없이 5줄 출력
+    advice = "\n".join(selected)
 
     return {
         "combined_advice": advice,
