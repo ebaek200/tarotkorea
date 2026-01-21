@@ -1,23 +1,35 @@
 import random
 import uvicorn
+import json
+import os
+import asyncio
 from fastapi import FastAPI
 from pydantic import BaseModel
+import google.generativeai as genai
 
 app = FastAPI()
-user_db = {}
 
-sentences = [
-    "현재 운세는 새로운 변화의 흐름 앞에 서 있습니다.",
-    "과거의 낡은 습관을 버리고 새 길을 찾는 것이 길합니다.",
-    "주변의 조력자와 화합하면 큰 성취를 이룰 수 있습니다.",
-    "자신의 신념을 믿고 꾸준히 정진하는 태도가 중요합니다.",
-    "조급함을 버리고 순리에 맡길 때 진정한 행복이 찾아옵니다.",
-    "기대하지 않았던 곳에서 귀인이 나타나 도움을 줄 것입니다.",
-    "지금은 내실을 다지며 때를 기다리는 것이 현명한 선택입니다.",
-    "작은 것에 연연하지 말고 큰 목표를 향해 나아가세요.",
-    "정직하고 성실한 자세가 결국 승리를 가져다줄 것입니다.",
-    "마음의 평온을 유지하면 막혔던 일들이 술술 풀리게 됩니다."
-]
+# --- 설정 및 데이터 관리 ---
+DB_FILE = "users.json"
+# 알려주신 API Key를 적용했습니다.
+GEMINI_API_KEY = "AIzaSyCCNjtYV0aE1BW9OHsQvhdycbXNCYeDX54"
+
+# Gemini AI 설정
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-pro')
+
+# 사용자 DB 로드/저장 함수
+def load_db():
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_db(db):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(db, f, ensure_ascii=False, indent=4)
+
+user_db = load_db()
 
 class RegisterRequest(BaseModel):
     phone: str
@@ -25,23 +37,71 @@ class RegisterRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"message": "Iching Tarot Server is running normally."}
+    return {"message": "Hwagyeong Iching Server V2.0 (AI Powered)"}
 
 @app.post("/register")
 async def register(req: RegisterRequest):
-    if req.phone not in user_db:
-        user_db[req.phone] = 10 if req.is_paid else 1
+    phone = req.phone
+    global user_db
+    
+    # 1. 신규 접속 번호
+    if phone not in user_db:
+        if req.is_paid:
+            user_db[phone] = {"remain": 10, "used_free": False}
+            msg = f"{phone}님은 10회 사용이 가능하십니다. 기억에 남는 시간 되세요."
+        else:
+            user_db[phone] = {"remain": 3, "used_free": True}
+            msg = "처음 사용하는 번호이시군요. 3회 무료 체험이 가능합니다."
+        save_db(user_db)
+        return {"status": "success", "remain": user_db[phone]["remain"], "msg": msg}
+    
+    # 2. 기존 접속 번호
     else:
-        if req.is_paid: user_db[req.phone] = 10
-    return {"remain": user_db[req.phone]}
+        user = user_db[phone]
+        if req.is_paid:
+            user["remain"] = 10 
+            save_db(user_db)
+            return {"status": "success", "remain": 10, "msg": f"결제가 확인되었습니다. 현재 {user['remain']}회 남았습니다."}
+        else:
+            if user["used_free"]:
+                return {"status": "fail", "msg": "이미 무료 체험을 사용한 번호입니다. 유료 결제 후 사용 가능합니다."}
+            else:
+                user["remain"] = 3
+                user["used_free"] = True
+                save_db(user_db)
+                return {"status": "success", "remain": 3, "msg": "3회 무료 체험이 가능합니다."}
 
 @app.get("/interpret")
 async def interpret(card1: int, card2: int, category: str, phone: str):
-    if phone in user_db and user_db[phone] > 0:
-        user_db[phone] -= 1
-    selected = random.sample(sentences, 5)
-    advice = "\n".join(selected)
-    return {"combined_advice": advice, "remain": user_db.get(phone, 0)}
+    global user_db
+    if phone in user_db and user_db[phone]["remain"] > 0:
+        user_db[phone]["remain"] -= 1
+        save_db(user_db)
+        
+        # AI 프롬프트 구성
+        prompt = (
+            f"당신은 주역 타로 전문가입니다. "
+            f"고객의 고민 카테고리: {category}. "
+            f"선택한 주역 괘: {card1}번과 {card2}번. "
+            f"이 두 괘의 상징적 의미를 결합하여 {category} 운세를 상세하고 따뜻하게 풀이해 주세요. "
+            f"한국어로 친절하게 5문장 정도로 답변해 주세요."
+        )
+
+        try:
+            # Gemini AI 호출
+            response = await asyncio.to_thread(model.generate_content, prompt)
+            advice = response.text
+        except Exception as e:
+            advice = "죄송합니다. AI 해설 생성 중 일시적인 오류가 발생했습니다."
+            print(f"AI Error: {e}")
+        
+        return {
+            "combined_advice": advice,
+            "remain": user_db[phone]["remain"],
+            "status": "success"
+        }
+    else:
+        return {"status": "over", "msg": "남은 횟수가 없습니다. 유료로 사용하세요."}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
