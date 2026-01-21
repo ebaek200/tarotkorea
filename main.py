@@ -2,15 +2,11 @@ import random
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import Optional
 
 app = FastAPI()
-
-# 임시 사용자 데이터베이스 (서버 재시작 시 초기화됨)
-# 실서비스 시에는 PostgreSQL 등을 연결해야 데이터가 유지됩니다.
 user_db = {}
 
-# 랜덤 해설 문장 소스
+# 종합 해설용 문장 소스
 sentences = [
     "현재 운세는 새로운 변화의 흐름 앞에 서 있습니다.",
     "과거의 낡은 습관을 버리고 새 길을 찾는 것이 길합니다.",
@@ -28,41 +24,25 @@ class RegisterRequest(BaseModel):
     phone: str
     is_paid: bool
 
-@app.get("/")
-async def root():
-    return {"message": "주역 타로 서버가 정상 작동 중입니다."}
-
 @app.post("/register")
 async def register(req: RegisterRequest):
-    # 신규 등록이거나 유료 결제 체크 시 횟수 부여
-    if req.is_paid:
-        user_db[req.phone] = 10
-    elif req.phone not in user_db:
-        user_db[req.phone] = 1  # 무료 사용자는 기본 1회
-    
+    if req.is_paid: user_db[req.phone] = 10
+    elif req.phone not in user_db: user_db[req.phone] = 1
     return {"remain": user_db.get(req.phone, 0)}
 
 @app.get("/interpret")
 async def interpret(card1: int, card2: int, category: str, phone: str):
-    # 횟수 확인 및 차감
-    current_remain = user_db.get(phone, 0)
-    
-    if current_remain > 0:
+    if phone in user_db and user_db[phone] > 0:
         user_db[phone] -= 1
-        current_remain = user_db[phone]
-        
-        # 5줄 랜덤 조합 생성
-        selected = random.sample(sentences, 5)
-        # 클라이언트 가독성을 위해 번호를 붙여서 전송
-        advice = "\n".join([f"{i+1}. {s}" for i, s in enumerate(selected)])
-    else:
-        advice = "잔여 횟수가 부족합니다. 유료 회원 가입 후 이용해주세요."
+    
+    # 5줄 랜덤 조합 (번호 제외)
+    selected = random.sample(sentences, 5)
+    advice = "\n".join(selected)
 
     return {
         "combined_advice": advice,
-        "remain": current_remain
+        "remain": user_db.get(phone, 0)
     }
 
 if __name__ == "__main__":
-    # Render 배포 시에는 0.0.0.0으로 열어야 외부 접속이 가능합니다.
     uvicorn.run(app, host="0.0.0.0", port=8000)
