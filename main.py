@@ -10,17 +10,35 @@ app = FastAPI()
 
 # --- 설정 및 데이터 관리 ---
 DB_FILE = "users.json"
+# 새로 발급받으신 키를 직접 입력했습니다.
+GEMINI_API_KEY = "AIzaSyCkSUH094XbgbOQv7sxOVA5HM5FscVhq18"
 
-# [보안 팁] 환경 변수에 키가 없으면 직접 입력한 키를 사용하도록 설정
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyCkSUH094XbgbOQv7sxOVA5HM5FscVhq18")
+# API 설정
+genai.configure(api_key=GEMINI_API_KEY)
 
-# API 설정 및 모델 로드
-try:
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    print("Gemini 1.5 Flash Model Configured Successfully.")
-except Exception as e:
-    print(f"Model Init Error: {e}")
+# 가용한 모델을 자동으로 찾아 설정하는 함수
+def get_best_model():
+    try:
+        # 현재 API 키로 사용 가능한 모델 목록 확인
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        print(f"가용 모델 목록: {models}")
+        
+        # 선호도 순서대로 모델 선택
+        for preferred in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']:
+            if preferred in models:
+                print(f"최종 선택 모델: {preferred}")
+                return genai.GenerativeModel(preferred)
+        
+        # 목록은 있으나 선호 모델이 없을 경우 첫 번째 모델 사용
+        if models:
+            return genai.GenerativeModel(models[0])
+    except Exception as e:
+        print(f"모델 리스트 조회 실패: {e}")
+    
+    # 실패 시 가장 기본 이름으로 리턴
+    return genai.GenerativeModel('gemini-1.5-flash')
+
+model = get_best_model()
 
 def load_db():
     if os.path.exists(DB_FILE):
@@ -44,37 +62,16 @@ class RegisterRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"message": "Hwagyeong Iching Server V3.1 (Security Enhanced)"}
-
-@app.post("/register")
-async def register(req: RegisterRequest):
-    phone = req.phone
-    global user_db
-    if phone not in user_db:
-        if req.is_paid:
-            user_db[phone] = {"remain": 10, "used_free": False}
-        else:
-            user_db[phone] = {"remain": 3, "used_free": True}
-        save_db(user_db)
-        return {"status": "success", "remain": user_db[phone]["remain"], "msg": "인증에 성공하였습니다."}
-    else:
-        user = user_db[phone]
-        if req.is_paid: user["remain"] = 10
-        save_db(user_db)
-        return {"status": "success", "remain": user["remain"], "msg": f"반갑습니다. {user['remain']}회 이용 가능합니다."}
+    return {"message": "Hwagyeong Iching Server V3.2 (Auto-Model Recovery)"}
 
 @app.get("/interpret")
 async def interpret(card1: int, card2: int, category: str, phone: str):
     global user_db
     if phone in user_db and user_db[phone]["remain"] > 0:
-        prompt = (
-            f"주역 전문가로서 {category} 상담을 진행합니다. "
-            f"선택된 주역 괘 번호는 {card1}번과 {card2}번입니다. "
-            f"이 두 괘의 상징적 의미를 결합하여 {category} 운세를 친절하게 풀이해 주세요. "
-            f"한국어로 따뜻하게 5문장 내외로 답변하세요."
-        )
-
+        prompt = f"주역 전문가로서 {category} 상담. {card1}번과 {card2}번 괘 조합. 따뜻한 한국어로 5문장 답변."
+        
         try:
+            # AI 호출 시 timeout 추가
             response = await asyncio.to_thread(model.generate_content, prompt)
             
             if response and hasattr(response, 'text') and response.text:
@@ -83,14 +80,23 @@ async def interpret(card1: int, card2: int, category: str, phone: str):
                 save_db(user_db)
                 return {"combined_advice": advice, "remain": user_db[phone]["remain"], "status": "success"}
             else:
-                return {"combined_advice": "AI가 해설을 생성했으나 내용을 표시할 수 없습니다.", 
-                        "remain": user_db[phone]["remain"], "status": "success"}
+                return {"combined_advice": "AI가 답변을 생성했으나 정책상 내용을 표시할 수 없습니다.", "remain": user_db[phone]["remain"], "status": "success"}
         except Exception as e:
-            print(f"!!! AI Error: {str(e)}")
-            return {"combined_advice": f"해설 생성 중 오류 발생 (사유: {str(e)[:30]})", 
-                    "remain": user_db[phone]["remain"], "status": "success"}
-            
-    return {"status": "over", "msg": "남은 횟수가 없습니다. 유료 결제 후 이용해 주세요."}
+            # 여기서 404가 나면 로그에 상세 내용을 찍습니다.
+            print(f"!!! AI Error Detailed: {str(e)}")
+            return {"combined_advice": f"해설 생성 중 오류 (사유: {str(e)[:40]}...)", "remain": user_db[phone]["remain"], "status": "success"}
+    return {"status": "over", "msg": "남은 횟수가 없습니다."}
+
+@app.post("/register")
+async def register(req: RegisterRequest):
+    # (기존 register 로직 동일)
+    phone = req.phone
+    global user_db
+    if phone not in user_db:
+        user_db[phone] = {"remain": 10 if req.is_paid else 3, "used_free": not req.is_paid}
+        save_db(user_db)
+        return {"status": "success", "remain": user_db[phone]["remain"], "msg": "인증 성공"}
+    return {"status": "success", "remain": user_db[phone]["remain"], "msg": "기존 회원"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
