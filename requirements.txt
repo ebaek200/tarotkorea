@@ -1,5 +1,4 @@
-# requirements.txt
 fastapi
 uvicorn
 pydantic
-google-generativeai>=0.3.0  # 버전을 명시하여 최신 기능 지원 보장
+google-generativeai>=0.8.3
