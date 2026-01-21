@@ -30,12 +30,11 @@ async def register(req: RegisterRequest):
     if req.phone not in user_db:
         user_db[req.phone] = 10 if req.is_paid else 1
     else:
-        if req.is_paid: user_db[req.phone] = 10 # 이미 있어도 유료면 갱신
+        if req.is_paid: user_db[req.phone] = 10
     return {"remain": user_db[req.phone]}
 
 @app.get("/interpret")
 async def interpret(card1: int, card2: int, category: str, phone: str):
-    # 횟수 차감 로직
     if phone in user_db and user_db[phone] > 0:
         user_db[phone] -= 1
 
