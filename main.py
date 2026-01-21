@@ -4,9 +4,10 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 app = FastAPI()
+
 user_db = {}
 
-# 종합 해설용 문장 소스
+# 종합 해설 문장 (5줄 구성을 위해 사용)
 sentences = [
     "현재 운세는 새로운 변화의 흐름 앞에 서 있습니다.",
     "과거의 낡은 습관을 버리고 새 길을 찾는 것이 길합니다.",
@@ -26,18 +27,17 @@ class RegisterRequest(BaseModel):
 
 @app.post("/register")
 async def register(req: RegisterRequest):
-    if req.is_paid: user_db[req.phone] = 10
-    elif req.phone not in user_db: user_db[req.phone] = 1
-    return {"remain": user_db.get(req.phone, 0)}
+    if req.phone not in user_db:
+        user_db[req.phone] = 10 if req.is_paid else 1
+    return {"remain": user_db[req.phone]}
 
 @app.get("/interpret")
 async def interpret(card1: int, card2: int, category: str, phone: str):
     if phone in user_db and user_db[phone] > 0:
         user_db[phone] -= 1
-    
-    # 5줄 랜덤 조합 (번호 제외)
+
     selected = random.sample(sentences, 5)
-    advice = "\n".join(selected)
+    advice = "\n".join(selected) # 번호 없이 5줄 출력
 
     return {
         "combined_advice": advice,
