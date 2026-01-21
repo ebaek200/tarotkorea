@@ -4,10 +4,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 app = FastAPI()
-
 user_db = {}
 
-# 종합 해설 문장 소스
 sentences = [
     "현재 운세는 새로운 변화의 흐름 앞에 서 있습니다.",
     "과거의 낡은 습관을 버리고 새 길을 찾는 것이 길합니다.",
@@ -41,14 +39,9 @@ async def register(req: RegisterRequest):
 async def interpret(card1: int, card2: int, category: str, phone: str):
     if phone in user_db and user_db[phone] > 0:
         user_db[phone] -= 1
-
     selected = random.sample(sentences, 5)
     advice = "\n".join(selected)
-
-    return {
-        "combined_advice": advice,
-        "remain": user_db.get(phone, 0)
-    }
+    return {"combined_advice": advice, "remain": user_db.get(phone, 0)}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
