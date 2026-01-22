@@ -3,29 +3,28 @@ import json
 import os
 import asyncio
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware # 추가됨
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import google.generativeai as genai
 
 app = FastAPI()
 
-# --- [추가] 브라우저 접속 허용 설정 (CORS) ---
+# 브라우저 접속 허용 설정 (CORS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # 모든 곳에서 접속 허용
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- 환경 변수 로드 ---
+# API 키 설정
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
 else:
-    print("⚠️ GEMINI_API_KEY missing")
+    print("⚠️ GEMINI_API_KEY 환경변수가 없습니다.")
 
 DB_FILE = "users.json"
 
@@ -51,7 +50,7 @@ class RegisterRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"status": "online", "mode": "web_compatible"}
+    return {"status": "online", "message": "Hwagyeong Iching Web Server is Live"}
 
 @app.post("/register")
 async def register(req: RegisterRequest):
@@ -67,13 +66,18 @@ async def register(req: RegisterRequest):
 @app.get("/interpret")
 async def interpret(card1: int, card2: int, category: str, phone: str):
     global user_db
-    if phone not in user_db or user_db[phone]["remain"] <= 0:
-        return {"status": "fail", "msg": "상담 횟수가 부족합니다."}
+    # 테스트 편의를 위해 DB에 번호가 없으면 자동 등록(3회) 해주는 로직 추가
+    if phone not in user_db:
+        user_db[phone] = {"remain": 3}
+        save_db(user_db)
+    
+    if user_db[phone]["remain"] <= 0:
+        return {"status": "fail", "msg": "상담 횟수가 모두 소진되었습니다."}
     
     prompt = (
-        f"당신은 주역 전문가입니다. [{category}] 상담입니다.\n"
-        f"카드: {card1}번, {card2}번.\n\n"
-        f"형식:\n첫 번째 괘 의미\n##\n두 번째 괘 의미\n##\n종합 조언"
+        f"당신은 심오한 지혜를 가진 주역 대가입니다. [{category}]에 대해 상담합니다.\n"
+        f"내담자가 뽑은 괘는 {card1}번과 {card2}번입니다.\n\n"
+        f"형식:\n첫 번째 괘 해설\n##\n두 번째 괘 해설\n##\n종합적인 처세술과 조언"
     )
 
     try:
@@ -81,8 +85,12 @@ async def interpret(card1: int, card2: int, category: str, phone: str):
         if response and response.text:
             user_db[phone]["remain"] -= 1
             save_db(user_db)
-            return {"status": "success", "combined_advice": response.text, "remain": user_db[phone]["remain"]}
-        return {"status": "fail", "msg": "AI 응답 실패"}
+            return {
+                "status": "success", 
+                "combined_advice": response.text, 
+                "remain": user_db[phone]["remain"]
+            }
+        return {"status": "fail", "msg": "AI 응답 생성 실패"}
     except Exception as e:
         return {"status": "fail", "msg": str(e)}
 
