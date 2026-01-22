@@ -3,20 +3,29 @@ import json
 import os
 import asyncio
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware # 추가됨
 from pydantic import BaseModel
 import google.generativeai as genai
 
 app = FastAPI()
 
+# --- [추가] 브라우저 접속 허용 설정 (CORS) ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # 모든 곳에서 접속 허용
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # --- 환경 변수 로드 ---
-GEMINI_API_KEY = os.environ.get("models/gemini-3-flash-preview")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    # 모델명을 'gemini-1.5-flash-latest'로 수정하여 호환성 확보
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
 else:
-    print("⚠️ GEMINI_API_KEY가 설정되지 않았습니다.")
+    print("⚠️ GEMINI_API_KEY missing")
 
 DB_FILE = "users.json"
 
@@ -42,7 +51,7 @@ class RegisterRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"status": "online", "model_info": "gemini-1.5-flash-latest"}
+    return {"status": "online", "mode": "web_compatible"}
 
 @app.post("/register")
 async def register(req: RegisterRequest):
@@ -61,42 +70,22 @@ async def interpret(card1: int, card2: int, category: str, phone: str):
     if phone not in user_db or user_db[phone]["remain"] <= 0:
         return {"status": "fail", "msg": "상담 횟수가 부족합니다."}
     
-    # 주역 전문가 페르소나 강화 프롬프트
     prompt = (
-        f"당신은 깊은 통찰력을 가진 주역 전문가입니다. 상담 주제는 [{category}]입니다.\n"
-        f"뽑은 괘는 {card1}번과 {card2}번입니다.\n\n"
-        f"반드시 다음 형식을 지켜주세요:\n"
-        f"첫 번째 괘 의미: 해당 괘의 핵심 풀이 (3문장)\n"
-        f"##\n"
-        f"두 번째 괘 의미: 해당 괘의 핵심 풀이 (3문장)\n"
-        f"##\n"
-        f"전문가 종합 조언: 두 괘의 상호작용을 통한 최종 조언 (5문장 내외)"
+        f"당신은 주역 전문가입니다. [{category}] 상담입니다.\n"
+        f"카드: {card1}번, {card2}번.\n\n"
+        f"형식:\n첫 번째 괘 의미\n##\n두 번째 괘 의미\n##\n종합 조언"
     )
 
     try:
-        # 비동기 호출
         response = await asyncio.to_thread(model.generate_content, prompt)
-        
         if response and response.text:
             user_db[phone]["remain"] -= 1
             save_db(user_db)
-            return {
-                "status": "success", 
-                "combined_advice": response.text, 
-                "remain": user_db[phone]["remain"]
-            }
-        return {"status": "fail", "msg": "AI 응답 생성 실패"}
-            
+            return {"status": "success", "combined_advice": response.text, "remain": user_db[phone]["remain"]}
+        return {"status": "fail", "msg": "AI 응답 실패"}
     except Exception as e:
-        error_str = str(e)
-        if "429" in error_str:
-            return {"status": "fail", "msg": "서버 과부하입니다. 1분만 기다려주세요."}
-        if "404" in error_str:
-            return {"status": "fail", "msg": "모델 설정 오류입니다. 관리자에게 문의하세요."}
-        return {"status": "fail", "msg": f"시스템 오류: {error_str}"}
+        return {"status": "fail", "msg": str(e)}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-
-
