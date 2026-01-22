@@ -9,7 +9,7 @@ import google.generativeai as genai
 app = FastAPI()
 
 # --- 환경 변수 로드 ---
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GEMINI_API_KEY = os.environ.get("models/gemini-3-flash-preview")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -98,4 +98,5 @@ async def interpret(card1: int, card2: int, category: str, phone: str):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
