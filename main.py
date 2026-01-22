@@ -14,7 +14,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     # 모델명을 'gemini-1.5-flash-latest'로 수정하여 호환성 확보
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    model = genai.GenerativeModel('gemini-pro')
 else:
     print("⚠️ GEMINI_API_KEY가 설정되지 않았습니다.")
 
@@ -98,3 +98,4 @@ async def interpret(card1: int, card2: int, category: str, phone: str):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
