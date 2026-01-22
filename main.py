@@ -13,10 +13,10 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    # 2.0 대신 안정적인 1.5 버전 사용 (무료 할당량 확보 용이)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # 모델명을 'gemini-1.5-flash-latest'로 수정하여 호환성 확보
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
 else:
-    print("⚠️ GEMINI_API_KEY missing")
+    print("⚠️ GEMINI_API_KEY가 설정되지 않았습니다.")
 
 DB_FILE = "users.json"
 
@@ -32,7 +32,7 @@ def save_db(db):
     try:
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(db, f, ensure_ascii=False, indent=4)
-    except Exception as e: print(f"DB Error: {e}")
+    except: pass
 
 user_db = load_db()
 
@@ -42,7 +42,7 @@ class RegisterRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"status": "online", "model": "gemini-1.5-flash"}
+    return {"status": "online", "model_info": "gemini-1.5-flash-latest"}
 
 @app.post("/register")
 async def register(req: RegisterRequest):
@@ -61,17 +61,20 @@ async def interpret(card1: int, card2: int, category: str, phone: str):
     if phone not in user_db or user_db[phone]["remain"] <= 0:
         return {"status": "fail", "msg": "상담 횟수가 부족합니다."}
     
-    if not GEMINI_API_KEY:
-        return {"status": "fail", "msg": "API Key not set"}
-
+    # 주역 전문가 페르소나 강화 프롬프트
     prompt = (
-        f"당신은 주역 대가입니다. [{category}] 상담입니다.\n"
-        f"뽑은 괘: {card1}번, {card2}번.\n"
-        f"형식: 카드1의미 / ## / 카드2의미 / ## / 전문가 종합 조언"
+        f"당신은 깊은 통찰력을 가진 주역 전문가입니다. 상담 주제는 [{category}]입니다.\n"
+        f"뽑은 괘는 {card1}번과 {card2}번입니다.\n\n"
+        f"반드시 다음 형식을 지켜주세요:\n"
+        f"첫 번째 괘 의미: 해당 괘의 핵심 풀이 (3문장)\n"
+        f"##\n"
+        f"두 번째 괘 의미: 해당 괘의 핵심 풀이 (3문장)\n"
+        f"##\n"
+        f"전문가 종합 조언: 두 괘의 상호작용을 통한 최종 조언 (5문장 내외)"
     )
 
     try:
-        # 비동기로 AI 호출
+        # 비동기 호출
         response = await asyncio.to_thread(model.generate_content, prompt)
         
         if response and response.text:
@@ -82,13 +85,15 @@ async def interpret(card1: int, card2: int, category: str, phone: str):
                 "combined_advice": response.text, 
                 "remain": user_db[phone]["remain"]
             }
-        return {"status": "fail", "msg": "AI 응답 없음"}
+        return {"status": "fail", "msg": "AI 응답 생성 실패"}
             
     except Exception as e:
-        # 429 에러 발생 시 사용자에게 친절하게 안내
-        if "429" in str(e):
-            return {"status": "fail", "msg": "현재 접속자가 많아 잠시 후 다시 시도해주세요. (API 할당량 초과)"}
-        return {"status": "fail", "msg": str(e)}
+        error_str = str(e)
+        if "429" in error_str:
+            return {"status": "fail", "msg": "서버 과부하입니다. 1분만 기다려주세요."}
+        if "404" in error_str:
+            return {"status": "fail", "msg": "모델 설정 오류입니다. 관리자에게 문의하세요."}
+        return {"status": "fail", "msg": f"시스템 오류: {error_str}"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
